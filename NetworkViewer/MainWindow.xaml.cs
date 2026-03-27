@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Shapes;
 using System.Windows.Media;
+using System.Windows.Controls;
 
 namespace NetworkViewer
 {
@@ -76,19 +77,36 @@ namespace NetworkViewer
             zoomControl.PreviewMouseRightButtonUp += ZoomControl_PreviewMouseRightButtonUp;
             zoomControl.PreviewMouseLeftButtonDown += ZoomControl_PreviewMouseLeftButtonDown;
 
-            // Wire up right-click edge drawing events for the initial test nodes
+            // Wire up events for the initial test nodes
             foreach (var vc in Area.VertexList.Values)
             {
-                // We only need the MouseDown event here now
                 vc.PreviewMouseRightButtonDown += Vertex_RightMouseDown;
+                vc.MouseDoubleClick += Vertex_MouseDoubleClick; // Added renaming event
             }
         }
 
         // --- INTERACTION EVENT HANDLERS ---
 
         // Spawns a new node on double click
+        // Spawns a new node on double click (only if clicking the empty background)
         private void ZoomControl_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
+            // 1. First, check exactly what UI element we clicked on
+            DependencyObject hitObject = e.OriginalSource as DependencyObject;
+
+            // Walk up the visual tree to see if that element belongs to an existing node
+            while (hitObject != null && hitObject != zoomControl)
+            {
+                if (hitObject is VertexControl)
+                {
+                    // We clicked a node! Abort spawning a new one.
+                    // The Vertex_MouseDoubleClick event will handle the renaming instead.
+                    return;
+                }
+                hitObject = VisualTreeHelper.GetParent(hitObject);
+            }
+
+            // 2. If we reach here, we definitely clicked the empty background. Spawn the node!
             var clickPosition = e.GetPosition(Area);
             var newNode = new NetworkNode { Name = $"New Node {_nodeCounter++}" };
             _graph.AddVertex(newNode);
@@ -96,10 +114,65 @@ namespace NetworkViewer
             var vertexControl = new VertexControl(newNode);
             vertexControl.SetPosition(clickPosition.X, clickPosition.Y);
 
-            // Attach edge drawing start event to the dynamically created node
+            // Attach interactions to the dynamically created node
             vertexControl.PreviewMouseRightButtonDown += Vertex_RightMouseDown;
+            vertexControl.MouseDoubleClick += Vertex_MouseDoubleClick;
 
             Area.AddVertexAndData(newNode, vertexControl, true);
+        }
+
+        // --- NEW: NODE RENAMING LOGIC ---
+
+        private void Vertex_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var vc = sender as VertexControl;
+            var node = vc.Vertex as NetworkNode;
+
+            // 1. Ask the user for the new name
+            string newName = PromptForNodeName(node.Name);
+
+            // 2. Update the underlying data model
+            node.Name = newName;
+
+            // 3. Force WPF to refresh the visual text using the DataContext trick
+            var nodeData = vc.DataContext;
+            vc.DataContext = null;
+            vc.DataContext = nodeData;
+
+            // Stop the click from passing through to the background canvas
+            e.Handled = true;
+        }
+
+        // A pure C# input dialog to avoid creating extra XAML files
+        private string PromptForNodeName(string currentName)
+        {
+            var prompt = new Window
+            {
+                Width = 300,
+                Height = 130,
+                Title = "Edit Node Name",
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            var stack = new StackPanel { Margin = new Thickness(10) };
+            var txtBox = new TextBox { Text = currentName, Margin = new Thickness(0, 0, 0, 10) };
+            var btnOk = new Button { Content = "OK", Width = 80, HorizontalAlignment = HorizontalAlignment.Right };
+
+            btnOk.Click += (s, ev) => prompt.DialogResult = true;
+
+            stack.Children.Add(new Label { Content = "Enter new node name:" });
+            stack.Children.Add(txtBox);
+            stack.Children.Add(btnOk);
+            prompt.Content = stack;
+
+            // ShowDialog blocks the rest of the app until the user clicks OK or closes the window
+            if (prompt.ShowDialog() == true && !string.IsNullOrWhiteSpace(txtBox.Text))
+            {
+                return txtBox.Text;
+            }
+            return currentName; // Return original if they cancel
         }
 
         // Starts drawing a preview line on right-click
@@ -134,42 +207,28 @@ namespace NetworkViewer
             }
         }
 
-
         // Deletes nodes or edges when the user holds ALT and clicks them
         private void ZoomControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            // Only trigger deletion if the ALT key is currently held down
             if (Keyboard.Modifiers == ModifierKeys.Alt)
             {
                 DependencyObject hitObject = e.OriginalSource as DependencyObject;
 
-                // Walk up the visual tree to see what we clicked on
                 while (hitObject != null && hitObject != zoomControl)
                 {
                     if (hitObject is VertexControl vc)
                     {
                         var node = vc.Vertex as NetworkNode;
-
-                        // 1. Remove from UI (GraphX automatically removes attached visual edges too)
                         Area.RemoveVertexAndEdges(node);
-
-                        // 2. Remove from the underlying data model
                         _graph.RemoveVertex(node);
-
-                        // Stop the click from panning the camera
                         e.Handled = true;
                         return;
                     }
                     else if (hitObject is EdgeControl ec)
                     {
                         var edge = ec.Edge as NetworkEdge;
-
-                        // 1. Remove from UI
                         Area.RemoveEdge(edge, true);
-
-                        // 2. Remove from the underlying data model
                         _graph.RemoveEdge(edge);
-
                         e.Handled = true;
                         return;
                     }
@@ -183,11 +242,9 @@ namespace NetworkViewer
         {
             if (_dragSource != null)
             {
-                // 1. Use WPF Hit Testing to find out what UI element we dropped the line on
                 DependencyObject hitObject = e.OriginalSource as DependencyObject;
                 VertexControl targetVertex = null;
 
-                // Walk up the visual tree to see if the hit object is part of a VertexControl
                 while (hitObject != null)
                 {
                     if (hitObject is VertexControl vc)
@@ -198,7 +255,6 @@ namespace NetworkViewer
                     hitObject = VisualTreeHelper.GetParent(hitObject);
                 }
 
-                // 2. If we found a valid target that isn't the node we started from
                 if (targetVertex != null && targetVertex != _dragSource)
                 {
                     var sourceData = _dragSource.Vertex as NetworkNode;
@@ -211,7 +267,6 @@ namespace NetworkViewer
                     Area.AddEdgeAndData(newEdge, edgeControl, true);
                 }
 
-                // 3. Always clean up the preview line
                 if (_previewLine != null)
                 {
                     Area.Children.Remove(_previewLine);
