@@ -74,6 +74,7 @@ namespace NetworkViewer
             zoomControl.MouseDoubleClick += ZoomControl_MouseDoubleClick;
             zoomControl.MouseMove += ZoomControl_MouseMove;
             zoomControl.PreviewMouseRightButtonUp += ZoomControl_PreviewMouseRightButtonUp;
+            zoomControl.PreviewMouseLeftButtonDown += ZoomControl_PreviewMouseLeftButtonDown;
 
             // Wire up right-click edge drawing events for the initial test nodes
             foreach (var vc in Area.VertexList.Values)
