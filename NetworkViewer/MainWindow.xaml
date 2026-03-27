@@ -1,0 +1,15 @@
+﻿<Window x:Class="NetworkViewer.MainWindow"
+       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:graphx="http://schemas.panthernet.ru/graphx/"
+        xmlns:local="clr-namespace:NetworkViewer"
+        Title="Network Editor" Height="450" Width="800">
+    <Grid>
+        <graphx:ZoomControl x:Name="zoomControl">
+
+            <local:NetworkGraphArea x:Name="Area" />
+
+        </graphx:ZoomControl>
+
+    </Grid>
+</Window>
