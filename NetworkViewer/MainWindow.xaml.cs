@@ -68,6 +68,7 @@ namespace NetworkViewer
             // 5. Render the Graph
             Area.GenerateGraph(true, true);
             zoomControl.ZoomToFill();
+            Area.ShowAllEdgesLabels(false);
 
             // 6. Wire up global events for drawing and adding nodes
             zoomControl.MouseDoubleClick += ZoomControl_MouseDoubleClick;
@@ -77,8 +78,8 @@ namespace NetworkViewer
             // Wire up right-click edge drawing events for the initial test nodes
             foreach (var vc in Area.VertexList.Values)
             {
+                // We only need the MouseDown event here now
                 vc.PreviewMouseRightButtonDown += Vertex_RightMouseDown;
-                vc.PreviewMouseRightButtonUp += Vertex_RightMouseUp;
             }
         }
 
@@ -94,9 +95,8 @@ namespace NetworkViewer
             var vertexControl = new VertexControl(newNode);
             vertexControl.SetPosition(clickPosition.X, clickPosition.Y);
 
-            // Crucial: Attach edge drawing events to the dynamically created node so it can be connected too!
+            // Attach edge drawing start event to the dynamically created node
             vertexControl.PreviewMouseRightButtonDown += Vertex_RightMouseDown;
-            vertexControl.PreviewMouseRightButtonUp += Vertex_RightMouseUp;
 
             Area.AddVertexAndData(newNode, vertexControl, true);
         }
@@ -133,33 +133,89 @@ namespace NetworkViewer
             }
         }
 
-        // Snaps the edge to a target node if dropped successfully
-        private void Vertex_RightMouseUp(object sender, MouseButtonEventArgs e)
+
+        // Deletes nodes or edges when the user holds ALT and clicks them
+        private void ZoomControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (_dragSource != null)
+            // Only trigger deletion if the ALT key is currently held down
+            if (Keyboard.Modifiers == ModifierKeys.Alt)
             {
-                var target = sender as VertexControl;
+                DependencyObject hitObject = e.OriginalSource as DependencyObject;
 
-                if (target != null && target != _dragSource)
+                // Walk up the visual tree to see what we clicked on
+                while (hitObject != null && hitObject != zoomControl)
                 {
-                    var sourceData = _dragSource.Vertex as NetworkNode;
-                    var targetData = target.Vertex as NetworkNode;
+                    if (hitObject is VertexControl vc)
+                    {
+                        var node = vc.Vertex as NetworkNode;
 
-                    var newEdge = new NetworkEdge(sourceData, targetData) { Capacity = 100 };
-                    _graph.AddEdge(newEdge);
+                        // 1. Remove from UI (GraphX automatically removes attached visual edges too)
+                        Area.RemoveVertexAndEdges(node);
 
-                    var edgeControl = new EdgeControl(_dragSource, target, newEdge);
-                    Area.AddEdgeAndData(newEdge, edgeControl, true);
+                        // 2. Remove from the underlying data model
+                        _graph.RemoveVertex(node);
+
+                        // Stop the click from panning the camera
+                        e.Handled = true;
+                        return;
+                    }
+                    else if (hitObject is EdgeControl ec)
+                    {
+                        var edge = ec.Edge as NetworkEdge;
+
+                        // 1. Remove from UI
+                        Area.RemoveEdge(edge, true);
+
+                        // 2. Remove from the underlying data model
+                        _graph.RemoveEdge(edge);
+
+                        e.Handled = true;
+                        return;
+                    }
+                    hitObject = VisualTreeHelper.GetParent(hitObject);
                 }
             }
         }
 
-        // Cleans up the preview line when the right mouse button is released
+        // Handles both the snapping of the edge and the cleanup in one place
         private void ZoomControl_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
-            if (_previewLine != null)
+            if (_dragSource != null)
             {
-                Area.Children.Remove(_previewLine);
+                // 1. Use WPF Hit Testing to find out what UI element we dropped the line on
+                DependencyObject hitObject = e.OriginalSource as DependencyObject;
+                VertexControl targetVertex = null;
+
+                // Walk up the visual tree to see if the hit object is part of a VertexControl
+                while (hitObject != null)
+                {
+                    if (hitObject is VertexControl vc)
+                    {
+                        targetVertex = vc;
+                        break;
+                    }
+                    hitObject = VisualTreeHelper.GetParent(hitObject);
+                }
+
+                // 2. If we found a valid target that isn't the node we started from
+                if (targetVertex != null && targetVertex != _dragSource)
+                {
+                    var sourceData = _dragSource.Vertex as NetworkNode;
+                    var targetData = targetVertex.Vertex as NetworkNode;
+
+                    var newEdge = new NetworkEdge(sourceData, targetData) { Capacity = 100 };
+                    _graph.AddEdge(newEdge);
+
+                    var edgeControl = new EdgeControl(_dragSource, targetVertex, newEdge);
+                    Area.AddEdgeAndData(newEdge, edgeControl, true);
+                }
+
+                // 3. Always clean up the preview line
+                if (_previewLine != null)
+                {
+                    Area.Children.Remove(_previewLine);
+                }
+
                 _previewLine = null;
                 _dragSource = null;
             }
